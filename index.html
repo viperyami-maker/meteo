@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1" />
+  <meta name="theme-color" content="#0b1630" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Météo" />
+  <title>Météo</title>
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="icons/icon-180.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body data-sky="clear-day">
+  <div class="sky" aria-hidden="true">
+    <div class="orb orb-a"></div>
+    <div class="orb orb-b"></div>
+    <canvas id="fx"></canvas>
+  </div>
+
+  <main class="app" id="app">
+    <!-- Barre du haut -->
+    <header class="topbar">
+      <button class="round-btn" id="open-cities" aria-label="Mes villes">
+        <svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10" /></svg>
+      </button>
+      <div class="loc">
+        <div class="loc-name"><svg class="pin" id="pin" viewBox="0 0 24 24" hidden><path d="M12 2a7 7 0 0 0-7 7c0 5 7 13 7 13s7-8 7-13a7 7 0 0 0-7-7Zm0 9.5A2.5 2.5 0 1 1 12 6.5a2.5 2.5 0 0 1 0 5Z"/></svg><span id="city-name">Météo</span></div>
+        <div class="loc-time" id="local-time">&nbsp;</div>
+      </div>
+      <button class="round-btn" id="fav-btn" aria-label="Ajouter aux favoris">
+        <svg viewBox="0 0 24 24"><path d="M12 17.3 18.2 21l-1.6-7L22 9.2l-7.2-.6L12 2 9.2 8.6 2 9.2 7.5 14l-1.7 7z" /></svg>
+      </button>
+    </header>
+
+    <!-- Contenu -->
+    <div class="scroll" id="scroll">
+      <section class="state" id="state"></section>
+
+      <section class="hero" id="hero" hidden>
+        <div class="hero-icon" id="now-icon"></div>
+        <div class="hero-temp"><span id="now-temp">--</span><span class="deg">°</span></div>
+        <div class="hero-desc" id="now-desc">--</div>
+        <div class="hero-range"><span id="now-hi">--</span><span class="dot"></span><span id="now-lo">--</span><span class="dot"></span><span id="now-feels">--</span></div>
+        <button class="model-badge" id="model-badge"><span class="live"></span><span id="model-badge-txt">--</span><svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></button>
+      </section>
+
+      <section class="panel insight" id="insight-card" hidden>
+        <div class="insight-icon" id="insight-icon"></div>
+        <p id="insight">--</p>
+      </section>
+
+      <section class="panel" id="hourly-card" hidden>
+        <h2><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>Prochaines 24 h</h2>
+        <div class="hourly" id="hourly"></div>
+      </section>
+
+      <section class="panel" id="daily-card" hidden>
+        <h2><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="3"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>10 prochains jours</h2>
+        <ul class="daily" id="daily"></ul>
+      </section>
+
+      <section class="panel" id="models-card" hidden>
+        <h2><svg viewBox="0 0 24 24"><path d="M3 17l5-6 4 4 8-9"/><path d="M3 21h18"/></svg>Comparaison des modèles</h2>
+        <p class="panel-sub">Température sur 48 h selon chaque modèle. Touchez un modèle pour l'utiliser.</p>
+        <div class="chart" id="models-chart"></div>
+        <ul class="model-list" id="model-list"></ul>
+      </section>
+
+      <section class="panel sea" id="sea-card" hidden>
+        <h2><svg viewBox="0 0 24 24"><path d="M2 15c2.5 0 2.5-2 5-2s2.5 2 5 2 2.5-2 5-2 2.5 2 5 2M2 20c2.5 0 2.5-2 5-2s2.5 2 5 2 2.5-2 5-2 2.5 2 5 2M12 3v6M9 6l3 3 3-3"/></svg>Mer <span class="where" id="sea-where"></span></h2>
+        <div class="sea-grid">
+          <div class="sea-main"><div class="sea-temp" id="sea-temp">--</div><div class="sea-lbl" id="sea-lbl">Température de l'eau</div></div>
+          <div class="sea-stats">
+            <div><small>Vagues</small><b id="sea-wave">--</b></div>
+            <div><small>Période</small><b id="sea-period">--</b></div>
+            <div><small>Houle de</small><b id="sea-dir">--</b></div>
+          </div>
+        </div>
+        <div class="sea-days" id="sea-days"></div>
+      </section>
+
+      <button class="panel beach-cta" id="open-beaches">
+        <span class="beach-ico"><svg viewBox="0 0 24 24"><path d="M2 20c2.5 0 2.5-2 5-2s2.5 2 5 2 2.5-2 5-2 2.5 2 5 2"/><path d="M12 16V7M5 9a7 7 0 0 1 14 0Z"/></svg></span>
+        <span class="beach-txt"><b>Température de l'eau</b><small>Les plages de France en direct</small></span>
+        <svg class="chev" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></svg>
+      </button>
+
+      <section class="tiles" id="tiles" hidden>
+        <div class="tile">
+          <div class="t-head"><svg viewBox="0 0 24 24"><path d="M3 8h11a3 3 0 1 0-3-3M3 12h15a3 3 0 1 1-3 3M3 16h7"/></svg>Vent</div>
+          <div class="compass" id="compass">
+            <span class="c-n">N</span><span class="c-e">E</span><span class="c-s">S</span><span class="c-w">O</span>
+            <div class="needle" id="needle"></div>
+            <div class="c-val"><b id="t-wind">--</b><small>km/h</small></div>
+          </div>
+          <div class="t-foot" id="t-gust">--</div>
+        </div>
+        <div class="tile">
+          <div class="t-head"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>Indice UV</div>
+          <div class="t-big" id="t-uv">--</div>
+          <div class="t-sub" id="t-uv-lbl">--</div>
+          <div class="uv-bar"><span id="uv-dot"></span></div>
+        </div>
+        <div class="tile">
+          <div class="t-head"><svg viewBox="0 0 24 24"><path d="M12 3s6 7 6 11a6 6 0 0 1-12 0c0-4 6-11 6-11Z"/></svg>Humidité</div>
+          <div class="t-big" id="t-hum">--</div>
+          <div class="t-foot" id="t-dew">--</div>
+        </div>
+        <div class="tile">
+          <div class="t-head"><svg viewBox="0 0 24 24"><path d="M7 16a4 4 0 0 1-.9-7.9A6 6 0 0 1 17.7 8 4.5 4.5 0 0 1 17 17H7Z"/><path d="M8 20l1-2M12 21l1-2M16 20l1-2"/></svg>Précipitations</div>
+          <div class="t-big" id="t-rain">--</div>
+          <div class="t-foot" id="t-rain-lbl">--</div>
+        </div>
+        <div class="tile wide">
+          <div class="t-head"><svg viewBox="0 0 24 24"><path d="M3 18h18M7 18a5 5 0 0 1 10 0M12 4v4M5 9l2 2M19 9l-2 2"/></svg>Soleil</div>
+          <div class="sun-arc">
+            <svg viewBox="0 0 300 110" preserveAspectRatio="none">
+              <path class="arc-bg" d="M10 100 Q150 -40 290 100" />
+              <path class="arc-fg" id="arc-fg" d="M10 100 Q150 -40 290 100" />
+              <line x1="0" y1="100" x2="300" y2="100" class="horizon" />
+              <circle id="sun-dot" r="8" cx="10" cy="100" />
+            </svg>
+          </div>
+          <div class="sun-times"><div><small>Lever</small><b id="t-sunrise">--</b></div><div class="mid"><small>Durée du jour</small><b id="t-daylen">--</b></div><div><small>Coucher</small><b id="t-sunset">--</b></div></div>
+        </div>
+        <div class="tile">
+          <div class="t-head"><svg viewBox="0 0 24 24"><circle cx="12" cy="13" r="8"/><path d="M12 13l4-4M12 3v2"/></svg>Pression</div>
+          <div class="t-big" id="t-pres">--</div>
+          <div class="t-foot">hPa</div>
+        </div>
+        <div class="tile">
+          <div class="t-head"><svg viewBox="0 0 24 24"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>Visibilité</div>
+          <div class="t-big" id="t-vis">--</div>
+          <div class="t-foot" id="t-vis-lbl">--</div>
+        </div>
+      </section>
+
+      <footer class="foot">
+        Données <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a> (CC BY 4.0) · Météo-France AROME/ARPEGE (Licence Ouverte Etalab) · ECMWF (CC BY 4.0) · DWD · NOAA · E.U. Copernicus Marine Service
+        <br><button class="link" id="unit-btn">Passer en °F</button>
+      </footer>
+    </div>
+  </main>
+
+  <!-- Feuille "Mes villes" -->
+  <div class="sheet-backdrop" id="sheet-backdrop" hidden></div>
+  <aside class="sheet" id="sheet" aria-hidden="true">
+    <div class="grabber"></div>
+    <div class="sheet-head">
+      <h3>Mes villes</h3>
+      <button class="text-btn" id="close-cities">Fermer</button>
+    </div>
+    <form class="search" id="search-form" autocomplete="off">
+      <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg>
+      <input id="search-input" type="search" inputmode="search" placeholder="Rechercher une ville" aria-label="Rechercher une ville" />
+    </form>
+    <ul class="suggestions" id="suggestions"></ul>
+    <button class="locate" id="locate-btn">
+      <svg viewBox="0 0 24 24"><path d="M3 11 21 3l-8 18-2-8-8-2Z"/></svg>
+      <span>Utiliser ma position</span>
+    </button>
+    <ul class="city-list" id="city-list"></ul>
+  </aside>
+
+  <!-- Feuille "Plages" -->
+  <aside class="sheet" id="beach-sheet" aria-hidden="true">
+    <div class="grabber"></div>
+    <div class="sheet-head">
+      <h3>Température de l'eau</h3>
+      <button class="text-btn" id="close-beaches">Fermer</button>
+    </div>
+    <div class="seg" id="beach-seg"></div>
+    <ul class="beach-list" id="beach-list"></ul>
+    <p class="sheet-note">Température de surface de la mer calculée par des modèles océaniques (pas une mesure de bouée), via Open-Meteo. Generated using E.U. Copernicus Marine Service Information.</p>
+  </aside>
+
+  <!-- Feuille "Modèle" -->
+  <aside class="sheet sheet-short" id="model-sheet" aria-hidden="true">
+    <div class="grabber"></div>
+    <div class="sheet-head">
+      <h3>Source des prévisions</h3>
+      <button class="text-btn" id="close-model">Fermer</button>
+    </div>
+    <ul class="model-pick" id="model-pick"></ul>
+  </aside>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>

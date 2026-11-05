@@ -617,6 +617,143 @@ async function renderBeaches() {
   }
 }
 
+/* ---------------- Fiche météo d'une plage : AROME vs ARPEGE ---------------- */
+const BD_MODELS = [
+  { key: "arome", name: "AROME", sub: "1,3 km · 2 jours", color: "#ff7a7a", ids: ["meteofrance_arome_france_hd", "meteofrance_arome_france"] },
+  { key: "arpege", name: "ARPEGE", sub: "11 km · 4 jours", color: "#ffbf5a", ids: ["meteofrance_arpege_europe"] },
+];
+let beachView = null, beachSeq = 0;
+
+// Valeur d'une variable pour un modèle, en prenant la 1re version disponible (AROME HD puis AROME 2,5 km).
+const bdVal = (h, base, ids, i) => { for (const m of ids) { const v = h[base + "_" + m]?.[i]; if (v != null) return v; } return null; };
+
+async function openBeach(idx) {
+  const b = BEACHES[idx], seq = ++beachSeq;
+  document.querySelectorAll(".sheet.open").forEach((s) => { s.classList.remove("open"); s.setAttribute("aria-hidden", "true"); });
+  showSheet("beach-detail");
+  $("bd-scroll").scrollTop = 0;
+  $("bd-scroll").innerHTML = `<div class="bd-title"><h3>${esc(b.name)}</h3><small>${b.zone}</small></div><div class="state"><div class="loader"></div>Chargement d'AROME et d'ARPEGE…</div>`;
+  try {
+    const q = new URLSearchParams({
+      latitude: b.lat, longitude: b.lon, timezone: "auto", forecast_days: 4,
+      hourly: "temperature_2m,weather_code,wind_speed_10m,wind_gusts_10m,wind_direction_10m,precipitation,is_day,uv_index",
+      models: "meteofrance_arome_france_hd,meteofrance_arome_france,meteofrance_arpege_europe,best_match",
+    });
+    if (state.unit === "F") q.set("temperature_unit", "fahrenheit");
+    const [w, m] = await Promise.all([
+      fetchJSON("https://api.open-meteo.com/v1/forecast?" + q),
+      fetchJSON("https://marine-api.open-meteo.com/v1/marine?" + new URLSearchParams({
+        latitude: b.slat, longitude: b.slon, timezone: "auto", forecast_days: 4,
+        current: "sea_surface_temperature,wave_height,wave_period,wave_direction",
+        hourly: "sea_surface_temperature,wave_height",
+      })).catch(() => null),
+    ]);
+    if (seq !== beachSeq) return;
+    const now = new Date(Date.now() + w.utc_offset_seconds * 1000);
+    const today = now.toISOString().slice(0, 10);
+    const days = [...new Set(w.hourly.time.map((t) => t.slice(0, 10)))].filter((d) => d >= today).slice(0, 3);
+    beachView = { b, w, m, now, days, day: 0 };
+    drawBeach();
+  } catch {
+    if (seq === beachSeq) $("bd-scroll").innerHTML += `<p class="bd-err">Impossible de charger la météo de cette plage. Vérifiez la connexion.</p>`;
+  }
+}
+
+// Résumé d'une journée (9 h – 19 h) pour un modèle
+function bdDay(h, ids, day) {
+  const idx = h.time.map((t, i) => [t, i]).filter(([t]) => t.startsWith(day)).map(([, i]) => i);
+  const daytime = idx.filter((i) => { const hr = +h.time[i].slice(11, 13); return hr >= 9 && hr <= 19; });
+  const temps = idx.map((i) => bdVal(h, "temperature_2m", ids, i)).filter((v) => v != null);
+  // Modèle hors de son horizon pour ce jour (il faut toute la journée, sinon le max serait faux)
+  if (temps.length < 20 || daytime.some((i) => bdVal(h, "temperature_2m", ids, i) == null)) return null;
+  const codes = daytime.map((i) => bdVal(h, "weather_code", ids, i)).filter((v) => v != null);
+  const count = (arr) => arr.reduce((o, c) => ((o[c] = (o[c] || 0) + 1), o), {});
+  const wet = codes.filter((c) => c >= 51);
+  const pool = wet.length >= 3 ? wet : codes;
+  const cnt = count(pool);
+  const code = pool.length ? +Object.keys(cnt).sort((a, b) => cnt[b] - cnt[a] || b - a)[0] : null;
+  const sum = (base, list) => list.reduce((s, i) => s + (bdVal(h, base, ids, i) || 0), 0);
+  const max = (base, list) => Math.max(...list.map((i) => bdVal(h, base, ids, i) ?? -Infinity));
+  return {
+    code, tmax: Math.max(...temps), tmin: Math.min(...temps),
+    rain: sum("precipitation", idx), rainDay: sum("precipitation", daytime),
+    wind: max("wind_speed_10m", daytime), gust: max("wind_gusts_10m", daytime),
+  };
+}
+
+function beachVerdict(d, water) {
+  if (!d) return null;
+  const tC = state.unit === "F" ? (d.tmax - 32) / 1.8 : d.tmax;
+  const wTxt = water != null ? ` Eau à ${Math.round(water)}°.` : "";
+  if (d.rainDay >= 2 || (d.code ?? 0) >= 95) return ["bad", "Pluie en journée : pas un jour de plage." + wTxt];
+  if (d.gust >= 55) return ["bad", "Rafales fortes en bord de mer : plage déconseillée." + wTxt];
+  if (d.wind >= 30) return ["meh", "Vent soutenu, sable qui vole : plutôt une balade." + wTxt];
+  if (tC >= 24 && d.rainDay < 0.5) return ["good", "Belle journée de plage !" + (water != null && water >= 20 ? " Baignade agréable." : wTxt)];
+  if (tC >= 19) return ["good", "Agréable pour la plage." + wTxt];
+  return ["meh", "Trop frais pour la baignade, idéal pour une balade." + wTxt];
+}
+
+function drawBeach() {
+  const { b, w, m, now, days, day } = beachView, h = w.hourly;
+  const dkey = days[day];
+  const nowKey = now.toISOString().slice(0, 13) + ":00";
+  let ni = h.time.indexOf(nowKey); if (ni < 0) ni = 0;
+  const nowM = BD_MODELS.find((x) => bdVal(h, "temperature_2m", x.ids, ni) != null) || BD_MODELS[1];
+  const airNow = bdVal(h, "temperature_2m", nowM.ids, ni);
+  const codeNow = bdVal(h, "weather_code", nowM.ids, ni) ?? bdVal(h, "weather_code", ["best_match"], ni);
+  const isDay = h["is_day_best_match"]?.[ni] ?? 1;
+  const windNow = bdVal(h, "wind_speed_10m", nowM.ids, ni), dirNow = bdVal(h, "wind_direction_10m", nowM.ids, ni);
+  const water = m?.current?.sea_surface_temperature;
+  const uvMax = Math.max(0, ...h.time.map((t, i) => (t.startsWith(dkey) ? h.uv_index_best_match?.[i] ?? 0 : 0)));
+  const sums = BD_MODELS.map((x) => bdDay(h, x.ids, dkey));
+  const verdict = beachVerdict(sums[0] || sums[1], water);
+  const dayLbl = (d, i) => (i === 0 ? "Aujourd'hui" : i === 1 ? "Demain" : DAYS[parseLocal(d).getUTCDay()].replace(/^./, (c) => c.toUpperCase()));
+  const mm = (v) => (v < 0.1 ? "0 mm" : v.toFixed(1).replace(".", ",") + " mm");
+  const kmh = (v) => (v == null || !isFinite(v) ? "--" : Math.round(v) + " km/h");
+  const card = (x, s) => s ? `
+      <div class="bd-model" style="--mc:${x.color}">
+        <div class="bd-mh"><span class="m-dot" style="background:${x.color}"></span><b>${x.name}</b><small>${x.sub}</small></div>
+        <div class="bd-ico">${icon(s.code ?? 2, 1, false)}</div>
+        <div class="bd-desc">${wmo(s.code ?? 2)[0]}</div>
+        <div class="bd-t"><b style="color:${tempColor(s.tmax, state.unit)}">${fmtT(s.tmax)}</b><span>${fmtT(s.tmin)}</span></div>
+        <dl><dt>Vent</dt><dd>${kmh(s.wind)}</dd><dt>Rafales</dt><dd>${kmh(s.gust)}</dd><dt>Pluie</dt><dd>${mm(s.rain)}</dd></dl>
+      </div>` : `
+      <div class="bd-model off" style="--mc:${x.color}">
+        <div class="bd-mh"><span class="m-dot" style="background:${x.color}"></span><b>${x.name}</b><small>${x.sub}</small></div>
+        <p>Pas de prévision ${x.key === "arome" ? "au-delà de 2 jours : AROME est un modèle à courte échéance" : "pour ce jour"}.</p>
+      </div>`;
+  // Heure par heure, 8 h → 20 h
+  const rows = h.time.map((t, i) => [t, i]).filter(([t]) => t.startsWith(dkey) && +t.slice(11, 13) >= 8 && +t.slice(11, 13) <= 20 && +t.slice(11, 13) % 2 === 0);
+  const seaAt = (t) => { const j = m?.hourly?.time.indexOf(t) ?? -1; return j < 0 ? null : m.hourly.wave_height[j]; };
+  const cell = (x, i) => {
+    const t = bdVal(h, "temperature_2m", x.ids, i);
+    if (t == null) return `<div class="bd-c na">—</div>`;
+    const c = bdVal(h, "weather_code", x.ids, i) ?? bdVal(h, "weather_code", ["best_match"], i);
+    const r = bdVal(h, "precipitation", x.ids, i) || 0;
+    return `<div class="bd-c"><span class="bd-ci">${icon(c, h.is_day_best_match?.[i] ?? 1, false)}</span><b>${fmtT(t)}</b><small>${Math.round(bdVal(h, "wind_speed_10m", x.ids, i) ?? 0)} km/h${r >= 0.1 ? ` · <i>${r.toFixed(1).replace(".", ",")}</i>` : ""}</small></div>`;
+  };
+  $("bd-scroll").innerHTML = `
+    <div class="bd-title"><h3>${esc(b.name)}</h3><small>${b.zone} · prévisions Météo-France</small></div>
+    <section class="bd-hero">
+      <div class="bd-water"><small>Eau</small><b style="color:${water == null ? "#fff" : tempColor(water, "C")}">${water == null ? "--" : seaT(water)}</b>
+        <span>${m?.current?.wave_height != null ? "Vagues " + m.current.wave_height.toFixed(1).replace(".", ",") + " m" : "&nbsp;"}</span></div>
+      <div class="bd-air"><div class="bd-air-ico">${icon(codeNow ?? 2, isDay, true)}</div>
+        <div><b>${fmtT(airNow)}</b><small>${wmo(codeNow ?? 2)[0]}</small><small>Vent ${kmh(windNow)}${dirNow != null ? " " + dirName(dirNow) : ""}</small></div></div>
+    </section>
+    ${verdict ? `<div class="bd-verdict ${verdict[0]}">${verdict[1]}</div>` : ""}
+    <div class="seg bd-days">${days.map((d, i) => `<button class="${i === day ? "on" : ""}" data-day="${i}">${dayLbl(d, i)}</button>`).join("")}</div>
+    <h4 class="bd-h">AROME et ARPEGE côte à côte</h4>
+    <div class="bd-models">${BD_MODELS.map((x, k) => card(x, sums[k])).join("")}</div>
+    <div class="bd-extra"><span>Indice UV max <b>${Math.round(uvMax)}</b></span>${water != null ? `<span>Période de houle <b>${m.current.wave_period != null ? Math.round(m.current.wave_period) + " s" : "--"}</b></span>` : ""}</div>
+    <h4 class="bd-h">Heure par heure</h4>
+    <div class="bd-table">
+      <div class="bd-row bd-head"><span></span>${BD_MODELS.map((x) => `<span style="color:${x.color}">${x.name}</span>`).join("")}<span>Vagues</span></div>
+      ${rows.map(([t, i]) => `<div class="bd-row"><span class="bd-hr">${+t.slice(11, 13)} h</span>${BD_MODELS.map((x) => cell(x, i)).join("")}<span class="bd-wv">${seaAt(t) != null ? seaAt(t).toFixed(1).replace(".", ",") + " m" : "—"}</span></div>`).join("")}
+    </div>
+    <button class="bd-full" id="bd-full">Voir toute la météo de ${esc(b.name)}<svg viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></svg></button>
+    <p class="sheet-note">AROME et ARPEGE : Météo-France (Licence Ouverte Etalab), via Open-Meteo. Température de l'eau calculée par modèle océanique, pas une mesure de bouée. Generated using E.U. Copernicus Marine Service Information.</p>`;
+}
+
 /* ---------------- Effets animés (pluie, neige, étoiles) ---------------- */
 const fx = (() => {
   const cv = $("fx"), ctx = cv.getContext("2d");
@@ -834,16 +971,29 @@ $("beach-seg").addEventListener("click", (e) => {
 $("beach-list").addEventListener("click", (e) => {
   const li = e.target.closest("[data-b]");
   if (!li) return;
-  const b = BEACHES[+li.dataset.b];
-  closeSheet();
-  loadPlace({ name: b.name, admin: b.zone, country: "France", lat: b.lat, lon: b.lon });
+  openBeach(+li.dataset.b);
+});
+$("close-bd").addEventListener("click", closeSheet);
+$("bd-back").addEventListener("click", () => {
+  $("beach-detail").classList.remove("open");
+  $("beach-detail").setAttribute("aria-hidden", "true");
+  showSheet("beach-sheet");
+});
+$("bd-scroll").addEventListener("click", (e) => {
+  const d = e.target.closest("[data-day]");
+  if (d && beachView) { beachView.day = +d.dataset.day; drawBeach(); return; }
+  if (e.target.closest("#bd-full") && beachView) {
+    const b = beachView.b;
+    closeSheet();
+    loadPlace({ name: b.name, admin: b.zone, country: "France", lat: b.lat, lon: b.lon });
+  }
 });
 
 // Glisser une feuille vers le bas pour la fermer
 document.querySelectorAll(".sheet").forEach((sh) => {
   let y0 = null, dy = 0;
   sh.addEventListener("touchstart", (e) => {
-    const sc = e.target.closest(".city-list, .beach-list, .model-pick");
+    const sc = e.target.closest(".city-list, .beach-list, .model-pick, .bd-scroll");
     if (sc && sc.scrollTop > 0) return;
     y0 = e.touches[0].clientY; dy = 0; sh.style.transition = "none";
   }, { passive: true });

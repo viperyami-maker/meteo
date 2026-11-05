@@ -1,5 +1,5 @@
 // Service worker : l'appli s'ouvre même hors ligne (dernières données en cache).
-const CACHE = "meteo-v2";
+const CACHE = "meteo-v3";
 const SHELL = ["./", "index.html", "style.css", "app.js", "manifest.webmanifest", "icons/icon.svg", "icons/icon-192.png", "icons/icon-512.png", "icons/icon-180.png"];
 
 self.addEventListener("install", (e) => {
